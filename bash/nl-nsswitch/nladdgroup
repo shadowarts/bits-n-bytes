@@ -1,0 +1,63 @@
+#!/bin/bash
+# Author: Andrew Alm <shadowarts@nonlogic.org>
+# Description: Replacement for addgroup for use with mysql-based authentication
+#    and authorization (pam-mysql and nss-mysql).  This is *mostly* compatable
+#    with Debian's standard addgroup program.
+#
+# Copyright (c) 2008 Nonlogic - For use under the terms of the GNU GPLv3.
+
+# Dispalys information on how to use this program and then exists.  This is used
+# when there is an error in the users input into the program.
+function show_usage
+{
+	echo "Usage: $0 GROUP"
+	echo "  Add a normal group"
+	exit 1
+}
+
+# Include /etc/nonlogic.conf
+if [ ! -x /etc/nonlogic.conf ]; then
+	echo "$0: Could not find '/etc/nonlogic.conf', check if the file exists and has proper permissions."
+	echo
+	show_usage
+fi
+
+source /etc/nonlogic.conf
+
+# Parse command line arguments
+until [ -z "$1" ]; do
+    case $1 in
+        --system )
+            DEFAULT_SYSTEM=1
+        ;;
+        -* )
+            show_usage
+        ;;
+        * )
+          if [ -n "$NEW_GROUP" ]; then
+                show_usage
+          fi
+
+          NEW_GROUP=$1
+        ;;
+    esac
+
+    shift
+done
+
+if [ -z "$NEW_GROUP" ]; then
+	echo "$0: no groupname given."
+	echo
+	show_usage
+fi
+
+# Check if group exists
+members $NEW_GROUP 2&> /dev/null
+if [ $? == 0 ]; then
+    echo "$0: the group '$NEW_GROUP' already exists."
+    echo
+    show_usage
+fi
+
+mysql -u$MYSQL_USERNAME -p$MYSQL_PASSWORD $MYSQL_DATABASE -e "CALL nss_create_group(\"$NEW_GROUP\", NULL, $DEFAULT_SYSTEM);"
+

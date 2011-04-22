@@ -1,0 +1,89 @@
+#!/bin/bash
+# Author: Andrew Alm <shadowarts@nonlogic.org>
+# Description: Replacement for adduser for use with mysql-based authentication
+#    and authorization (pam-mysql and nss-mysql).  This is *mostly* compatable
+#    with Debian's standard adduser program.
+#
+# Copyright (c) 2008 Nonlogic - For use under the terms of the GNU GPLv3.
+
+# In:
+#    nothing
+# Out:
+#    nothing
+# Note: 
+#          exits program
+function show_usage
+{
+	echo "Usage: $0 [--remove-home] [--remove-all-files] [--backup] [--backup-to DIR] USER"
+	echo "  Delete a normal user"
+	exit 1
+}
+
+if [ ! -x /etc/nonlogic.conf ]; then
+	echo "$0: Could not find '/etc/nonlogic.conf', check if file exists and has proper permissions."
+	echo
+	show_usage
+fi
+
+source /etc/nonlogic.conf
+
+# Parse command line arguments
+until [ -z "$1" ]; do
+	case $1 in
+		--remove-home)
+			DEFAULT_REMOVE_HOME=1
+		;;
+		--remove-all-files)
+			DEFAULT_REMOVE_ALL=1
+		;;
+		--backup)
+			DEFAULT_BACKUP=1
+		;;
+		--backup-to)
+			shift
+			DEFAULT_BACKUP_DIR=$1
+		;;
+		-* )
+			show_usage 
+		;;
+		* )
+			if [ -n "$DEL_USER" ]; then
+				show_usage
+			fi
+
+			DEL_USER=$1
+		;;
+	esac
+
+	shift
+done
+
+if [ -z "$DEL_USER" ]; then
+	echo "$0: no username given."
+	echo
+	show_usage
+fi
+
+# Check if user exists
+if [ "`id -un $DEL_USER 2> /dev/null`" != "$DEL_USER" ]; then
+	echo "$0: the user '$DEL_USER' already exists."
+	exit 1
+fi
+
+#if [ $DEFAULT_BACKUP ]; then
+#fi
+
+if [ $DEFAULT_DELETE_ALL ]; then
+	find / -user $DEL_USER -exec rm -rf {} \;
+fi
+
+if [ $DEFAULT_DELETE_HOME ]; then
+	rm -rf ~$DEL_USER
+fi
+
+# Todo: Fix this call
+#mysql -u$MYSQL_USERNAME -p$MYSQL_PASSWORD $MYSQL_DATABASE -e "CALL nss_create_user(\"$NEW_USER\", \"$PASSWORD\", \"$DEFAULT_GROUP\", \"$FIRST_NAME\", \"$LAST_NAME\", \"$USER_EMAIL\", \"$USER_HOME\", \"$DEFAULT_SHELL\");" > /dev/null
+#cp -rpax /etc/skel $USER_HOME
+#chown -R $NEW_USER:$DEFAULT_GROUP $USER_HOME
+mysql -u$MYSQL_USERNAME -p$MYSQL_PASSWORD $MYSQL_DATABASE -e "CALL nss_remove_user(\"$DEL_USER\");" > /dev/null
+

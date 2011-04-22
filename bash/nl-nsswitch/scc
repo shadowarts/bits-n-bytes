@@ -1,0 +1,70 @@
+#!/bin/bash
+# Author: Andrew Alm <shadowarts@nonlogic.org>
+# Description: A simple script to C to a.out compiler.  This is used to make a
+#    binary out of any script, primarily to bypass suid/sgid limitations of
+#    script executables on a linux system.
+#    
+# Copyright (c) 2008 Nonlogic - For use under the terms of the GNU GPLv3.
+
+function show_usage
+{
+    echo "Usage: $0 [--script PATH] [--compile-only] SCRIPT"
+    echo "  Convert a script to a C program or elf executable."
+    exit 1
+}
+
+INTERPRETER_=/bin/bash
+
+# Parse command line
+until [ -z "$1" ]; do
+    case $1 in
+        --script )
+            shift
+            INTERPRETER_=$1
+        ;;
+        --compile-only )
+            COMPILE_ONLY=1
+        ;;
+        -* )
+            show_usage
+        ;;
+        * )
+            if [ -n "$SCRIPT_" ]; then
+                show_usage
+            fi
+
+            SCRIPT_=$1
+    esac
+
+    shift
+done
+
+if [ -z "$SCRIPT_" ]; then
+    echo "$0: no script given."
+    echo
+    show_usage
+fi
+
+touch /tmp/bash.$$.c
+chmod 600 /tmp/bash.$$.c
+
+{
+echo "#include <stdlib.h>"
+echo "#include <stdio.h>"
+echo ""
+echo "char *bash_script = \"$(cat $SCRIPT_ | perl -pe 's/(.|\n)/sprintf "\\%03o", ord $1/eg')\";" 
+echo ""
+echo "int main(int argc, char **argv)"
+echo "{"
+echo "  return system(bash_script);"
+echo "}"
+} > /tmp/bash.$$.c
+
+if [ -n "$COMPILE_ONLY" ]; then
+    mv /tmp/bash.$$.c bash.c
+    exit
+fi
+
+gcc -o a.out /tmp/bash.$$.c
+rm /tmp/bash.$$.c
+

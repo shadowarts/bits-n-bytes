@@ -1,0 +1,103 @@
+#!/bin/bash
+# Author: Andrew Alm <shadowarts@nonlogic.org>
+# Description: This program is used to view and set user meta-info.  Nonlogic staff is
+#    permitted to change any user-meta information per request of a user.  This
+#    information can contain anything from a user's email address to website
+#    authorizations.
+#
+# Copyright (c) Nonlogic - For use under the terms of the GNU GPLv3
+
+# Displays information on how to use this program and then exists.  This is used
+# when there is an error in the user's input into the program.
+function show_usage
+{
+    echo "Usage $0 [--private] [--batch] [--get KEY] [--set KEY VALUE] USER"
+    echo "  Gets or sets user-meta information for a user."
+    exit 1
+}
+
+# This command must be ran through sudo (original user not root)
+if [ -z "$SUDO _USER" ]; then
+    echo "$0: This program must be ran through sudo."
+    echo
+    show_usage
+fi
+
+if [ "$SUDO_USER" == "root" ]; then
+    echo "$0: Root cannot run this program through sudo."
+    echo
+    show__usage
+fi
+
+# Include /etc/nonlogic.conf
+if [ ! -x /etc/nonlogic.conf ]; then
+    echo "$0: Could not find '/etc/nonlogic.cobf', check if file exists and has proper permissions."
+    echo
+    show_usage
+fi
+
+source /etc/nonlogic.conf
+
+BATCH=0
+PRIVATE=0
+
+# Parse command line arguments
+until [ -z "$1" ]; do
+    case $1 in
+        --batch )
+            BATCH=1
+        ;;
+        --private )
+            PRIVATE=1
+        ;;
+        --get )
+            OPERATION="get"
+            shift
+            KEY=$1
+        ;;
+        --set )
+            OPERATION="set"
+            shift
+            KEY=$1
+            shift
+            VALUE=$1
+        ;;
+        -* )
+            show_usage
+        ;;
+        * )
+            META_USER=$1
+        ;;
+    esac
+
+    shift
+done
+
+if [ -z "$META_USER" ]; then
+    echo "$0: no username given."
+    echo
+    show_usage
+fi
+
+if [ -z "$OPERATION" ]; then
+    echo "$0: please specify get or set."
+    echo
+    show_usage
+fi
+
+if [ -z "$KEY" ]; then
+    echo "$0: no keyname or key query given."
+    echo 
+    show_usage
+fi
+
+# Set user metadata and record note
+if [ $OPERATION == "set" ]; then
+    mysql -u$MYSQL_USERNAME -p$MYSQL_PASSWORD $MYSQL_DATABASE -e "CALL nss_set_user_meta(\"$META_USER\", \"$KEY\", \"$VALUE\", $PRIVATE);" > /dev/null
+    mysql -u$MYSQL_USERNAME -p$MYSQL_PASSWORD $MYSQL_DATABASE -e  "CALL nss_add_user_note(\"$META_USER\", \"$SUDO_USER\", \"Set user metadata $KEY=$VALUE\", 0);" > /dev/null
+elif [ $BATCH == 0 ]; then
+    mysql -u$MYSQL_USERNAME -p$MYSQL_PASSWORD $MYSQL_DATABASE -e "CALL nss_get_user_meta(\"$META_USER\", \"$KEY\", $PRIVATE);"
+else
+    mysql --batch -u$MYSQL_USERNAME -p$MYSQL_PASSWORD $MYSQL_DATABASE -e "CALL nss_get_user_meta(\"$META_USER\", \"$KEY\", $PRIVATE);" |  awk 'BEGIN { FS="\t" } { if(NR == 2) { print $2; }}'
+fi
+

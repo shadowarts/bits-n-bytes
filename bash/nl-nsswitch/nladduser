@@ -1,0 +1,164 @@
+#!/bin/bash
+# Author: Andrew Alm <shadowarts@nonlogic.org>
+# Description: Replacement for adduser for use with mysql-based authentication
+#    and authorization (pam-mysql and nss-mysql).  This is *mostly* compatible
+#    with Debian's standard adduser program.
+#
+# Copyright (c) 2008 Nonlogic - For use under the terms of the GNU GPLv3.
+
+# TODO:
+#  - Get rid of 'seq' in generate_password, this is a linux only command and
+#    there is a way to get bash to do it.
+
+# Generates a password of the given length and sets the variable PASSWORD to
+# the newly generated password.  Each password can consist of A-Z, a-z, 0-9.
+function generate_password
+{
+	char=(a b c d e f g h i j k l m n o p q r s t u v w x y z
+		A B C D E F G H I J K L M N O P Q R S T U V W X Y Z
+		0 1 2 3 4 5 6 7 8 9)
+
+	for i in `seq 1 $1`; do
+		PASSWORD="${PASSWORD}${char[$RANDOM%${#char[*]}]}"
+	done
+}
+
+# Displays information on how to use this program and then exits.  This is used
+# when there is an error in the users input into the program.
+function show_usage
+{
+	echo "Usage: $0 [--home HOME] [--shell SHELL] [--group GROUP] [--disabled-password] [--disabled-login] [--system] USER"
+	echo "  Add a normal user"
+	exit 1
+}
+
+# This command must be ran through sudo (original user not root)
+if [ -z "$SUDO_USER" ]; then
+    echo "$0: This program must be ran through sudo."
+    echo
+    show_usage
+fi
+
+if [ "$SUDO_USER" == "root" ]; then
+    echo "$0: Root cannot run this program through sudo."
+    echo
+    show_usage
+fi
+
+# Include /etc/nonlogic.conf
+if [ ! -x /etc/nonlogic.conf ]; then
+        echo "$0: Could not find '/etc/nonlogic.conf', check if file exists and has proper permissions."
+        echo
+        show_usage
+fi
+
+source /etc/nonlogic.conf
+
+# Parse command line arguments
+until [ -z "$1" ]; do
+	case $1 in
+		--home )
+			shift
+			USER_HOME=$1
+		;;
+		--shell )
+			if [ "$DEFAULT_SHELL" != "/bin/false" ]; then
+				shift
+				DEFAULT_SHELL=$1
+			fi
+		;;
+		--group )
+			shift
+			DEFAULT_GROUP=$1
+		;;
+		--disabled-password )
+			DISABLED_PASSWORD=1
+		;;
+		--disabled-login )
+			DEFAULT_SHELL=/bin/false
+		;;
+        --system )
+            DEFAULT_SYSTEM=1
+        ;;
+		-* )
+			show_usage 
+		;;
+		* )
+			if [ -n "$NEW_USER" ]; then
+				show_usage
+			fi
+
+			NEW_USER=$1
+			if [ -z "$USER_HOME" ]; then
+				USER_HOME=/home/$1
+			fi
+		;;
+	esac
+
+	shift
+done
+
+if [ -z "$NEW_USER" ]; then
+	echo "$0: no username given."
+	echo
+	show_usage
+fi
+
+# Check if user exists
+if [ -n "`id -un $NEW_USER 2> /dev/null`" ]; then
+	echo "$0: the user '$NEW_USER' already exists."
+    echo
+    show_usage
+fi
+
+# Get all user information
+FINISHED="n"
+while [ $FINISHED != "y" ]; do
+	read -p "Email Address: " USER_EMAIL 
+	read -p "First Name: " FIRST_NAME
+	read -p "Last Name: " LAST_NAME
+	echo "=============================="
+	echo "Username: $NEW_USER"
+	echo "Email-Address $USER_EMAIL"
+	echo "First Name: $FIRST_NAME"
+	echo "Last Name: $LAST_NAME"
+	echo "=============================="
+	read -p "Is this correct? [y/N] " FINISHED
+done
+
+if [ -z "$DISABLED_PASSWORD" ]; then
+	generate_password 8
+else
+	PASSWORD=
+fi
+
+if [ ! -x "$ADDUSER_EMAIL_TEMPLATE" ]; then
+	echo "$0: Could not find '$EMAIL_TEMPLATE', check if file exists and has proper permissions."
+	echo
+	show_usage
+fi
+
+# Add user to database 
+mysql -u$MYSQL_USERNAME -p$MYSQL_PASSWORD $MYSQL_DATABASE -e "CALL nss_create_user(\"$NEW_USER\", \"$PASSWORD\", \"$DEFAULT_GROUP\", \"$FIRST_NAME\", \"$LAST_NAME\", \"$USER_EMAIL\", \"$USER_HOME\", \"$DEFAULT_SHELL\", $DEFAULT_SYSTEM);" > /dev/null
+mysql -u$MYSQL_USERNAME -p$MYSQL_PASSWORD $MYSQL_DATABASE -e "CALL nss_add_user_note(\"$NEW_USER\", \"$SUDO_USER\", \"Account created by $SUDO_USER.\", 0);"
+mysql -u$MYSQL_USERNAME -p$MYSQL_PASSWORD $MYSQL_DATABASE -e "CALL nss_set_user_meta(\"$NEW_USER\", \"staff_contact\", \"$SUDO_USER\", 0);"
+
+# Make sure the user was created
+if [ -z "`id -un $NEW_USER 2> /dev/null`" ]; then
+    echo "$0: the user '$NEW_USER' could not be created"
+    echo
+    show_usage
+fi
+
+# Setup users home directory
+cp -rpax /etc/skel $USER_HOME
+chown -R $NEW_USER:$DEFAULT_GROUP $USER_HOME
+
+# Create and send email.
+MESSAGE=/tmp/$NEW_USER.eml
+touch $MESSAGE
+chown 600 $MESSAGE
+source $ADDUSER_EMAIL_TEMPLATE > /tmp/$NEW_USER.eml
+mail -s "Welcome to Nonlogic." $USER_EMAIL -- -f $SUDO_USER < $MESSAGE
+rm -f $MESSAGE
+

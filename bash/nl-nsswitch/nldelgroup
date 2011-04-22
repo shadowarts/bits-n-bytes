@@ -1,0 +1,46 @@
+#!/bin/bash
+# Author: Andrew Alm <shadowarts@nonlogic.org>
+# Description: Replacement for delgroup for use with mysql-based authentication
+#    and authorization (pam-mysql and nss-mysql).  This is *mostly* compatable
+#    with Debian's standard addgroup program.
+#
+# Copyright (c) 2008 Nonlogic - For use under the terms of the GNU GPLv3.
+
+# TODO:
+#  - Check if group actually exists before attempting to delete.
+#  - Change group owner of files owned by group.
+
+# Displays information on how to use this program and then exits.  This is used
+# when there is an error in the users input into the program.
+function show_usage
+{
+	echo "Usage: $0 GROUP"
+	echo "  Add a normal group"
+	exit 1
+}
+
+# Include /etc/nonlogic.conf
+if [ ! -x /etc/nonlogic.conf ]; then
+	echo "$0: Could not find '/etc/nonlogic.conf', check if the file exists and has proper permissions."
+	echo
+	show_usage
+fi
+
+source /etc/nonlogic.conf
+
+# Check for proper input from the command line.
+if [ $# -gt 1 ]; then
+	echo "$0: Only takes one argument."
+	echo
+	show_usage
+fi
+
+# If no group name was given, ask for one (being nice in this script for some reason).
+if [ -z "$1"  ]; then
+	read -p "Enter a group name to remove: " GROUP_NAME
+else
+	GROUP_NAME=$1
+fi
+
+mysql -u$MYSQL_USERNAME -p$MYSQL_PASSWORD $MYSQL_DATABASE -e "CALL nss_remove_group(\"$GROUP_NAME\");"
+

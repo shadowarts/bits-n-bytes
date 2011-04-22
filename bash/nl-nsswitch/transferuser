@@ -1,0 +1,70 @@
+#!/bin/bash
+# Author: Andrew Alm <shadowarts@nonlogic.org>
+# Description: This script is used to automatically import a user
+#    from another server.
+#
+# Copyright (c) 2008 Nonlogic - For use under the terms of the GNU GPLv3
+
+# Include /etc/nonlogic.conf
+if [ ! -x /etc/nonlogic.conf ]; then
+    echo "$0: Could not find '/etc/nonlogic.conf', check if file exists and has proper permissions."
+    exit 1
+fi
+
+source /etc/nonlogic.conf
+
+if [ $IMPORT_DISABLED ]; then
+    echo "Account importation has been disabled at this time.  Please"
+    echo "try again later."
+    exit 1
+fi
+
+# Warn user about the dangers of this and give them an option.
+echo "Welcome to jesse.nonlogic.org.  This script will import your"
+echo "account from leibniz.nonlogic.org.  During this process you"
+echo "will (most likely) be a assigned a new user id and your account"
+echo "on leibniz.nonlogic.org will be deactived."
+echo
+read -p "Are you sure you want to continue [y/N]: " BEGIN_IMPORT
+echo
+
+if [ "$BEGIN_IMPORT" != "y" ] && [ "$BEGIN_IMPORT" != "Y" ]; then
+    echo "You chose to NOT continue. Logging off..."
+    exit 1
+fi
+
+read -p "Please enter your username: " IMPORT_USER
+
+
+# Check if user exists and if the username is somewhat sane
+if [ -n "`id -un $NEW_USER 2> /dev/null`" ] && [ -n "$NEW_USER" ]; then
+	echo "$0: the user '$NEW_USER' already exists or is not an allowable username."
+    echo
+    show_usage
+fi
+
+# Fetch users directory from import server
+scp -C -r $IMPORT_USER@$IMPORT_SERVER/home/$IMPORT_USER /home/$IMPORT_USER
+
+# Check if scp was successful
+if [ $? -ne 0 ]; then
+    rm -rf /tmp/import/$IMPORT_USER/
+
+    echo "$0: There was an error importing your account data."
+    exit 1
+fi
+
+mysql -u$MYSQL_USERNAME -p$MYSQL_PASSWORD $MYSQL_DATABASE -e "CALL nss_create_user(\"$NEW_USER\", \"$PASSWORD\", \"$DEFAULT_GROUP\", \"$FIRST_NAME\", \"$LAST_NAME\", \"$USER_EMAIL\", \"$USER_HOME\", \"$DEFAULT_SHELL\", $DEFAULT_SYSTEM);" > /dev/null
+mysql -u$MYSQL_USERNAME -p$MYSQL_PASSWORD $MYSQL_DATABASE -e "CALL nss_add_user_note(\"$NEW_USER\", \"$USER\", \"Account imported by $SUDO_USER.\", 0);"
+mysql -u$MYSQL_USERNAME -p$MYSQL_PASSWORD $MYSQL_DATABASE -e "CALL nss_set_user_meta(\"$NEW_USER\", \"staff_contact\", \"$USER\", 0);"
+
+# Does the user exist now?
+if [ -z "`id -un $NEW_USER 2> /dev/null`" ]; then
+    rm -rf /tmp/import/$IMPORT_USER/
+
+    echo "$0: There was an error creating your new account."
+    exit 1
+fi
+
+chown -R $IMPORT_USER:users /home/$IMPORT_USER
+

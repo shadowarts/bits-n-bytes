@@ -1,0 +1,104 @@
+#!/bin/bash
+# Author: Andrew Alm <shadowarts@nonlogic.org>
+# Description: Replacement for gpasswd for use with mysql-based authentication
+#    and authorization (pam-mysql and nss-mysql).  This is *mostly* compatable
+#    with Debian's standard gpasswd program.
+#
+# Copyright (c) 2008 Nonlogic - For use under the terms of the GNU GPLv3.
+
+# Displays information on how to use this program and then exits.  This is used
+# when there is an error in the users input into the program.
+function show_usage
+{
+	echo "Usage: $0 [-a USER] [-d USER] GROUP" 
+	echo "  Adds and removes users from a group"
+	exit 1
+}
+
+# This command must be run through sudo (original user not root)
+if [ -z "$SUDO_USER" ]; then
+    echo "$0: This program must be run through sudo."
+    echo
+    show_usage
+fi
+
+if [ "$SUDO_USER" == "root" ]; then
+    echo "$0: Root cannot run this program through sudo."
+    echo
+    show_usage
+fi
+
+# Include /etc/nonlogic.conf
+if [ ! -x /etc/nonlogic.conf ]; then
+        echo "$0: Could not find '/etc/nonlogic.conf', check if file exists and has proper permissions."
+        echo
+        show_usage
+fi
+
+source /etc/nonlogic.conf
+
+# Parse command line arguments
+until [ -z "$1" ]; do
+	case $1 in
+		-a )
+            ADD_USER=1
+			shift
+            USERNAME=$1
+		;;
+		-d )
+            DEL_USER=1
+            shift
+            USERNAME=$1
+		;;
+		-* )
+			show_usage 
+		;;
+		* )
+			if [ -n "$GROUPNAME" ]; then
+				show_usage
+			fi
+
+			GROUPNAME=$1
+		;;
+	esac
+
+	shift
+done
+
+if [ -z "$USERNAME" ]; then
+	echo "$0: no username given."
+	echo
+	show_usage
+fi
+
+if [ -z "$GROUPNAME" ]; then
+    echo "$0: no groupname given."
+    echo
+    show_usage
+fi
+
+# Check if user exists
+if [ -z "`id -un $NEW_USER 2> /dev/null`" ]; then
+	echo "$0: the user '$NEW_USER' does not exist."
+    echo
+    show_usage
+fi
+
+# Add/Remove user to/from group
+if [ "$ADD_USER" == "1" ]; then
+    mysql -u$MYSQL_USERNAME -p$MYSQL_PASSWORD $MYSQL_DATABASE -e "CALL nss_add_group_user(\"$USERNAME\", \"$GROUPNAME\");" > /dev/null
+    mysql -u$MYSQL_USERNAME -p$MYSQL_PASSWORD $MYSQL_DATABASE -e "CALL nss_add_user_note(\"$USERNAME\", \"$SUDO_USER\", \"Added user to $GROUPNAME group.\", 0);" > /dev/null
+    exit
+
+fi
+
+if [ "$DEL_USER" == "1" ]; then
+    mysql -u$MYSQL_USERNAME -p$MYSQL_PASSWORD $MYSQL_DATABASE -e "CALL nss_remove_group_user(\"$USERNAME\", \"$GROUPNAME\");" > /dev/null
+    mysql -u$MYSQL_USERNAME -p$MYSQL_PASSWORD $MYSQL_DATABASE -e "CALL nss_add_user_note(\"$USERNAME\", \"$SUDO_USER\", \"Removed user from $GROUPNAME group.\", 0);" > /dev/null
+    exit
+fi
+    
+echo "$0: no operation given."
+echo
+show_usage
+
